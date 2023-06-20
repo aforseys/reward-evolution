@@ -5,29 +5,32 @@ import gymnasium
 from gymnasium import spaces
 import pygame
 import numpy as np
-from reward_machines.envs.grids.grid_world_map import GridWorldMap
 from reward_machines.reward_machines.rm_environment import RewardMachineEnv
 
 class GridWorldEnv(gymnasium.Env):
+   # metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4} 
 
-    def __init__(self, map_env):
-        self.map_env = map_env 
-        self.size = map_env.size  # The size of the square grid
+    def __init__(self, size=8):
+        self.size = size  # The size of the square grid
         self.window_size = 512  # The size of the PyGame window
-        
-        proposition_keys = self.map_env.get_propositions()
-        self.propositions = {prop:False for prop in proposition_keys}
 
-        # Observations are dictionaries with the agent's, targets', and hazards' locations. 
-        self.observation_space = spaces.Dict({"a_loc": spaces.Box(0, self.size - 1, shape=(2,), dtype=int)}) 
-        for target in self.map_env.target_locs: 
-            self.observation_space[target+"_loc"] = spaces.Box(0, self.size - 1, shape=(2,), dtype=int)
-        if self.map_env.hazard_locs:  #this isn't actually true, get a list ..?
-            self.observation_space["h_loc"] = spaces.Box(0, self.size - 1, shape=(2,), dtype=int) 
+        # Observations are dictionaries with the agent's and the target's location.
+        # Each location is encoded as an element of {0, ..., `size`}^2, i.e. MultiDiscrete([size, size]).
+        self.observation_space = spaces.Dict(
+            {
+                "a_loc": spaces.Box(0, size - 1, shape=(2,), dtype=int), #agent location
+                "B_loc": spaces.Box(0, size - 1, shape=(2,), dtype=int), #target locations
+                "C_loc": spaces.Box(0, size - 1, shape=(2,), dtype=int),
+                "h_loc": spaces.Box(0, size - 1, shape=(2,), dtype=int) #hazard location
+            }
+        ) 
+        
+        #We have 3 propositions, corresponding to if either target or the hazard has been reached
+        self.propositions = {"B": False, "C": False, "h": False}
 
         # We have 4 actions, corresponding to "right", "up", "left", "down", "right"
         self.action_space = spaces.Discrete(4)
-        self._obstacle_locations = self.map_env.obstacle_locs
+        self._obstacle_locations = [np.array([3,2]), np.array([3,3]), np.array([4,2]), np.array([4,1])]
 
         """
         The following dictionary maps abstract actions from `self.action_space` to 
@@ -35,11 +38,14 @@ class GridWorldEnv(gymnasium.Env):
         I.e. 0 corresponds to "right", 1 to "up" etc.
         """
         self._action_to_direction = {
-            0: np.array([0, 1]),
-            1: np.array([1, 0]),
-            2: np.array([0, -1]),
-            3: np.array([-1, 0]),
+            0: np.array([1, 0]),
+            1: np.array([0, 1]),
+            2: np.array([-1, 0]),
+            3: np.array([0, -1]),
         }
+
+#         assert render_mode is None or render_mode in self.metadata["render_modes"]
+#         self.render_mode = render_mode
 
         """
         If human-rendering is used, `self.window` will be a reference
@@ -51,35 +57,28 @@ class GridWorldEnv(gymnasium.Env):
         self.window = None
         self.clock = None
 
-    def _get_obs(self): 
-     
-        obs = {"a_loc":self._agent_location}
-        for target in self._target_locations: 
-            obs[target+"_loc"] = self._target_locations[target]
-        if self._hazard_locations:
-            obs["h_loc"] = self._hazard_locations
-        return obs 
+    def _get_obs(self):
+        return {"a_loc": self._agent_location, "B_loc": self._target_locations[0], "C_loc": self._target_locations[1], "h_loc": self._hazard_location}
     
-    def get_events(self): 
+    def get_events(self):
         
         #If agent at either target, update propositions 
         #In this environment once a proposition holds, no turning off 
-        for target in self._target_locations: 
-            if np.array_equal(self._agent_location, self._target_locations[target]):
-                self.propositions[target] = True 
-                
-        #if agent at any hazard             
-        if self._hazard_locations and np.any(np.all(self._agent_location == self._hazard_locations, axis=1)): 
-            self.propositions["h"]=True 
+        if np.array_equal(self._agent_location, self._target_locations[0]):
+            self.propositions["B"]=True 
+        if np.array_equal(self._agent_location, self._target_locations[1]):
+            self.propositions["C"]=True
+        if np.array_equal(self._agent_location, self._hazard_location):
+            self.propositions["h"]=True
 
         #Return string of true propositions (string is how they represent and evaluate props)
         return "".join([prop for prop in self.propositions if self.propositions[prop]]) 
 
     def _get_info(self):
-        #feature set, only using distance to hazard      
+        #feature set, only using distance to hazard 
         return {
             "distance_B": np.linalg.norm(
-                self._agent_location - self._target_locations["b"], ord=1)}
+                self._agent_location - self._target_locations[0], ord=1)}
 #            ),
 #             "distance_C": np.linalg.norm(
 #                 self._agent_location - self._target_locations[1], ord=1
@@ -94,16 +93,16 @@ class GridWorldEnv(gymnasium.Env):
         super().reset(seed=seed)
 
         #set target locations
-        self._target_locations = self.map_env.target_locs
+        self._target_locations = [np.array([4,6]),np.array([2,2])]
         
         #set hazard location
-        self._hazard_locations = self.map_env.hazard_locs
+        self._hazard_location = np.array([1,4])
         
         #set agent location (for now initialized same every time)
-        self._agent_location = self.map_env.agent_loc
+        self._agent_location = np.array([0,0])
         
         #need to reset propositions at start 
-        self.propositions = dict.fromkeys(self.propositions, False) #set all propositions back to false 
+        self.propositions = {"B": False, "C": False, "h": False}
 
         # Choose the agent's location uniformly at random 
         # such that it doesn't interfere with targets 
@@ -132,14 +131,9 @@ class GridWorldEnv(gymnasium.Env):
         # Map the action (element of {0,1,2,3}) to the direction we walk in
         direction = self._action_to_direction[action]
         
-        # If there are obstacles, move if not bumping into. 
-        if self._obstacle_locations:
-            if not np.any(np.all(self._agent_location+direction == self._obstacle_locations, axis=1)):
-                # We use `np.clip` to make sure we don't leave the grid
-                self._agent_location = np.clip(
-                    self._agent_location+direction, 0, self.size - 1
-                )
-        else: 
+        # Move agent to state as long as not obstacle
+        if not np.any(np.all(self._agent_location+direction == self._obstacle_locations, axis=1)):
+            
             # We use `np.clip` to make sure we don't leave the grid
             self._agent_location = np.clip(
                 self._agent_location+direction, 0, self.size - 1
@@ -154,7 +148,26 @@ class GridWorldEnv(gymnasium.Env):
         # # Receive reward based on RM state
         reward = 0 #all reward comes from RM 
         terminated = False 
+        
+        # terminated = False 
+        # if propositions["h"]:
+        #     terminated=True
+        #     reward = -100
+        # elif propositions["B"] and propositions["C"]:
+        #     terminated = True 
+        #     reward = 100 
+        # elif propositions["B"]: #already reached reward 1
+        #     reward = -1
+        # else: #haven't reached either target 
+        #     reward = -1 + -20/(info["distance_hazard"] + 0.001) #add small buffer to prevent division by zero 
+                
+     #   terminated = np.array_equal(self._agent_location, self._target_location[0])
+     #   reward = 1 if terminated else 0  # Binary sparse rewards
+        
        
+#         if self.render_mode == "human":
+#             self._render_frame()
+
         return observation, reward, terminated, info
         #return observation, reward, terminated, False, info #not sure why the False was here, not good reason online 
 
@@ -300,8 +313,8 @@ class GridWorldRMEnv(RewardMachineEnv):
             raise NotImplementedError           
             
 class ObstacleRMEnv(GridWorldRMEnv):
-    def __init__(self, rm_files, map_file):
-        map_env = GridWorldMap(map_file)
-        env = GridWorldEnv(map_env)
+    def __init__(self, rm_files):
+       # rm_files = ["./reward_machines/envs/grids/reward_machines/rm1.txt"]
+        env = GridWorldEnv()
         super().__init__(env,rm_files)
             

@@ -1,5 +1,5 @@
 0 # initial state
 [1, 2] # terminal states 
-(0,0,'!B&!h',ConstantRewardFunction(-1))
+(0,0,'!b&!h',ConstantRewardFunction(-1))
 (0,1,'h',ConstantRewardFunction(-100))
-(0,2,'!h&B',ConstantRewardFunction(100))
+(0,2,'!h&b',ConstantRewardFunction(100))

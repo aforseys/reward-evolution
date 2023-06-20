@@ -100,7 +100,8 @@ def get_epsilon_greedy_action(estimator, info, epsilon):
     action = np.random.choice(np.arange(len(action_probs)), p=action_probs)
     return action
         
-def q_learning_linear(env, total_timesteps=500000, lr=1e-4, discount_factor=1.0, epsilon=0.1, epsilon_decay=1.0, use_crm=True, print_freq=100):
+def q_learning_linear(env, num_episodes=3000, episode_length=200, lr=1e-4, discount_factor=1.0, epsilon=0.1, epsilon_decay=1.0, use_crm=True, print_freq=100):
+    #Test using number of episodes and specified episode lengths
     """
     Q-Learning algorithm for off-policy TD control using linear function approximation.
     Finds the optimal greedy policy while following an epsilon-greedy policy.
@@ -118,9 +119,9 @@ def q_learning_linear(env, total_timesteps=500000, lr=1e-4, discount_factor=1.0,
         An EpisodeStats object with two numpy arrays for episode_lengths and episode_rewards.
     """
     #initialize environment and rewards 
-    episode_rewards = [0]
-    obs,info = env.reset()
-    env_obs, rm_obs = obs 
+    episode_rewards = []
+#     obs,info = env.reset()
+#     env_obs, rm_obs = obs 
     
     #initialize q function approximations for each state in the RM
     #define using one-hot encodings of RM states? whatever will be returned by obs 
@@ -128,68 +129,73 @@ def q_learning_linear(env, total_timesteps=500000, lr=1e-4, discount_factor=1.0,
 #     for rm_state in env.reward_machines[0].U:  #assuming only 1 RM we are learning a policy for 
 #         models[rm_state] = Estimator(env, info) 
 #INSTEAD: add as you go 
+    for e in range(num_episodes):
+        episode_rewards.append(0)
+        obs,info = env.reset()
+        env_obs, rm_obs = obs
+        done = False 
     
-    for t in range(1,total_timesteps+1): #assume that can't start in terminal state? try to take step w/o checking if done 
+        for t in range(1,episode_length+1): #assume that can't start in terminal state? try to take step w/o checking if done 
 #         print("time step", t)
-        rm_state = tuple(rm_obs["rm-state"])
+            if done:
+                break
+            
+            rm_state = tuple(rm_obs["rm-state"])
         
-        if rm_state not in models.keys():
-            models[rm_state] = Estimator(env,info) #specific info not important, just need length
-            print("Model initialized as", models[rm_state].model)
-#         print(models[rm_state].action_space)
-#         print(models[rm_state].action_space.n)
-        action = get_epsilon_greedy_action(models[rm_state], info, epsilon) #assuming not in terminal state 
+            if rm_state not in models.keys():
+                models[rm_state] = Estimator(env,info) #specific info not important, just need length
+        
+    #         print(models[rm_state].action_space)
+    #         print(models[rm_state].action_space.n)
+            action = get_epsilon_greedy_action(models[rm_state], info, epsilon) #assuming not in terminal state 
     
-#         print("action selected", action)
-#         print(type(action))
-        reset = False 
-        new_obs, r, done, new_info = env.step(action) #includes generating counterfactual experiences  
-     #   print("new obs directly after", new_obs) 
-        if use_crm: 
-            experiences = new_info["crm-experience"] #returns a list of counterfactual experiences generated per each RM state 
-        else: 
-            experiences = [(obs, action, r, new_obs, done)]
-            
-        #take step to update for the state-action value fcn of each state
-        for _obs, _action, _r, _new_obs, _done in experiences:
-            _env_obs, _rm_obs = _obs
-            _rm_state = tuple(_rm_obs["rm-state"]) #this is STARTING RM state
-            
-            _new_env_obs, _new_rm_obs = _new_obs
-            _new_rm_state = tuple(_new_rm_obs["rm-state"]) #this is ENDING RM state (different if transitioned) 
-            
-            if _rm_state not in models.keys():
-                models[_rm_state] = Estimator(env,info)#specific info not important, just need length
-                
-            if _done: 
-                target = _r #no future rewards to add 
-            else: 
-                if _new_rm_state not in models.keys():
-                    models[_new_rm_state] = Estimator(env,info)#specific info not important, just need length
-                
-                #update estimator with received reward and estimated future reward (from estimator of ending RM state) 
-                predicted_next_q = models[_new_rm_state].predict(new_info) #think calculating with new info is correct... 
-                target = _r + discount_factor* np.max(predicted_next_q) #take greedy action (off-policy not following e-greedy)
-            
-            #think info correct here (not changing between rm states), not new_info because updating initial state before step 
-            models[_rm_state].update(info, _action, target, lr) 
-            
-        obs, info = new_obs, new_info 
-        env_obs, rm_obs = obs 
-        episode_rewards[-1] += r #Add to reward of current episode (at end of list)
+    #         print("action selected", action)
+    #         print(type(action))
+            reset = False 
+            new_obs, r, done, new_info = env.step(action) #includes generating counterfactual experiences  
         
-        if done: 
-            obs,info = env.reset()
+            if use_crm: 
+                experiences = new_info["crm-experience"] #returns a list of counterfactual experiences generated per each RM state 
+            else: 
+                experiences = [(obs, action, r, new_obs, done)]
+            
+            #take step to update for the state-action value fcn of each state
+            for _obs, _action, _r, _new_obs, _done in experiences:
+                _env_obs, _rm_obs = _obs
+                _rm_state = tuple(_rm_obs["rm-state"]) #this is STARTING RM state
+            
+                _new_env_obs, _new_rm_obs = _new_obs
+                _new_rm_state = tuple(_new_rm_obs["rm-state"]) #this is ENDING RM state (different if transitioned) 
+            
+                if _rm_state not in models.keys():
+                    models[_rm_state] = Estimator(env,info)#specific info not important, just need length
+                
+                if _done: 
+                    target = _r #no future rewards to add 
+                else: 
+                    if _new_rm_state not in models.keys():
+                        models[_new_rm_state] = Estimator(env,info)#specific info not important, just need length
+                
+                    #update estimator with received reward and estimated future reward (from estimator of ending RM state) 
+                    predicted_next_q = models[_new_rm_state].predict(new_info) #think calculating with new info is correct... 
+                    target = _r + discount_factor* np.max(predicted_next_q) #take greedy action (off-policy not following e-greedy)
+            
+                #think info correct here (not changing between rm states), not new_info because updating initial state before step 
+                models[_rm_state].update(info, _action, target, lr) 
+            
+            obs, info = new_obs, new_info 
             env_obs, rm_obs = obs 
-            episode_rewards.append(0) #Add new episode to end of list
+            episode_rewards[-1] += r #Add to reward of current episode (at end of list)
+            #print(episode_rewards) 
+#             if done: 
+#                 obs,info = env.reset()
+#                 env_obs, rm_obs = obs 
+#                 episode_rewards.append(0) #Add new episode to end of list
         
         #Print for debugging purposes  
-        if t%print_freq ==0:
-            num_episodes = len(episode_rewards) 
-            print("last action was", action) 
-            print("observation is", rm_obs)
-            print("model is", models)
-            print("Step {}/{} @ Episode {} ({})".format(t, total_timesteps, num_episodes, episode_rewards[-1]))
+        if e%print_freq ==0:
+            #num_episodes = len(episode_rewards) 
+            print("Episode {}/{} ({})".format(e, num_episodes, episode_rewards[-1]))
    
     return models   
         

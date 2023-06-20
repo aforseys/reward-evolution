@@ -1,0 +1,4 @@
+0 # initial state
+[1] # terminal states 
+(0,0,'!b&!h|!b&h',ConstantRewardFunction(-1))
+(0,1,'b',ConstantRewardFunction(100))

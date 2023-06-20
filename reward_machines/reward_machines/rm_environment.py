@@ -104,8 +104,8 @@ class RewardMachineEnv(gymnasium.Wrapper):
         rm_feat = self.rm_done_feat if done else self.rm_state_features[(rm_id,u_id)]
         rm_obs = {'features': next_obs,'rm-state': rm_feat}
        # print(rm_obs)
-        #return [self.observation_dict,rm_obs]
-        return gymnasium.spaces.flatten(self.observation_dict, rm_obs)           
+        return [self.observation_dict,rm_obs]
+        #return gymnasium.spaces.flatten(self.observation_dict, rm_obs)           
 
 
 class RewardMachineWrapper(gymnasium.Wrapper):
